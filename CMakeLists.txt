@@ -43,10 +43,6 @@ option (ENABLE_ASAN "Enable Address Sanitizer" OFF)
 
 option (ENABLE_TESTS "Enable additional tests" OFF)
 
-if (ANDROID)
-    message (FATAL_ERROR "Android is no longer supported (https://git.io/vH2gW)")
-endif ()
-
 # Proprietary Linux games often ship their own libraries (zlib, libstdc++,
 # etc.) in order to ship a single set of binaries across multiple
 # distributions.  Given that apitrace wrapper modules will be loaded into those
