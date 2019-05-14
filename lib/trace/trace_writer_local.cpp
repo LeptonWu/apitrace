@@ -93,6 +93,9 @@ LocalWriter::open(void) {
         static unsigned dwCounter = 0;
 
         os::String process = os::getProcessName();
+#ifdef ANDROID
+        process.trimColon();
+#endif
 #ifdef _WIN32
         process.trimExtension();
 #endif

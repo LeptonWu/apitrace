@@ -411,6 +411,13 @@ public:
         }
     }
 
+    void trimColon(void) {
+        iterator dot = rfind(':');
+        if (dot != buffer.end()) {
+            buffer.erase(dot, end());
+        }
+    }
+
     void join(const String & other) {
         if (length() && end()[-1] != OS_DIR_SEP) {
             append(OS_DIR_SEP);
