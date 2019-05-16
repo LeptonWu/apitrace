@@ -80,6 +80,7 @@ target_link_libraries (trace
     guids
     crc32c
     ${SNAPPY_LIBRARIES}
+    ${PATCH_SYMBOLIC_LIBRARIES}
 )
 
 # Code shared across all OpenGL variants

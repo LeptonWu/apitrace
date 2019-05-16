@@ -62,3 +62,26 @@ _dlopen(const char *filename, int flag)
     return dlopen_ptr(filename, flag);
 }
 
+#ifdef ANDROID
+/*
+ * Invoke the true android_dlopen_ext() function.
+ */
+static inline void *
+_android_dlopen_ext(const char *filename, int flag, void* ext)
+{
+    typedef void * (*PFN_DLOPEN)(const char *, int, void*);
+    static PFN_DLOPEN dlopen_ptr = NULL;
+
+    if (!dlopen_ptr) {
+        dlopen_ptr = (PFN_DLOPEN)dlsym(RTLD_NEXT, "android_dlopen_ext");
+        if (!dlopen_ptr)
+            dlopen_ptr = (PFN_DLOPEN)dlsym(RTLD_DEFAULT, "android_dlopen_ext");
+        if (!dlopen_ptr) {
+            os::log("apitrace: error: failed to look up real android_dlopen_ext\n");
+            return NULL;
+        }
+    }
+
+    return dlopen_ptr(filename, flag, ext);
+}
+#endif

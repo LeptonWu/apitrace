@@ -142,6 +142,85 @@ classifyLibrary(const char *pathname)
 }
 
 
+
+#ifdef ANDROID
+
+#include <map>
+#include "patch-symbolic.h"
+
+#include "os_string.hpp"
+#include "os_thread.hpp"
+
+static os::mutex mutex;
+static std::map<std::string, void* > lib_namespace;
+
+#define ANDROID_DLEXT_USE_NAMESPACE 0x200
+
+typedef struct {
+  /** A bitmask of `ANDROID_DLEXT_` enum values. */
+  uint64_t flags;
+
+  /** Used by `ANDROID_DLEXT_RESERVED_ADDRESS` and `ANDROID_DLEXT_RESERVED_ADDRESS_HINT`. */
+  void*   reserved_addr;
+  /** Used by `ANDROID_DLEXT_RESERVED_ADDRESS` and `ANDROID_DLEXT_RESERVED_ADDRESS_HINT`. */
+  size_t  reserved_size;
+
+  /** Used by `ANDROID_DLEXT_WRITE_RELRO` and `ANDROID_DLEXT_USE_RELRO`. */
+  int     relro_fd;
+
+  /** Used by `ANDROID_DLEXT_USE_LIBRARY_FD`. */
+  int     library_fd;
+  /** Used by `ANDROID_DLEXT_USE_LIBRARY_FD_OFFSET` */
+  off64_t library_fd_offset;
+
+  /** Used by `ANDROID_DLEXT_USE_NAMESPACE`. */
+  void* library_namespace;
+} android_dlextinfo;
+
+static const char* maybe_patch_lib(const char* fname, char* buf, size_t len)
+{
+    if (strncmp(fname, "/data/app/", 10) &&
+	strncmp(fname, "/mnt/asec/", 10) &&
+        strcmp(fname, "/system/lib/egl/libGLESv2_emulation.so"))
+        return fname;
+
+    os::String process = os::getProcessName();
+    process.trimColon();
+    os::String prefix = "/data/data";
+    prefix.join(process);
+
+    return patch_symbolic(fname, prefix.str(), buf, len);
+}
+
+extern "C" PUBLIC
+void* android_dlopen_ext(const char* filename, int flags,
+                         const android_dlextinfo* ext)
+{
+    void *addr = __builtin_return_address(0);
+    Dl_info info;
+    const char *caller;
+    char tmp[1024];
+
+    filename = maybe_patch_lib(filename, tmp, sizeof(tmp));
+
+    if (ext && ext->flags == ANDROID_DLEXT_USE_NAMESPACE &&
+	ext->library_namespace) {
+	void * ns = ext->library_namespace;
+	mutex.lock();
+	auto it = lib_namespace.find(filename);
+	if (it == lib_namespace.end() &&
+	    dladdr(addr, &info)) {
+            caller = info.dli_fname;
+            if (caller && !strcmp(caller, "/system/lib/libnativeloader.so"))
+	        lib_namespace.insert(std::pair<std::string, void *>(filename, ns));
+	}
+	mutex.unlock();
+    }
+    return _android_dlopen_ext(filename, flags, (void *)ext);
+}
+
+#endif
+
 /*
  * Several applications, such as Quake3, use dlopen("libGL.so.1"), but
  * LD_PRELOAD does not intercept symbols obtained via dlopen/dlsym, therefore
@@ -156,6 +235,11 @@ void * dlopen(const char *filename, int flag)
     if (!filename) {
         return _dlopen(filename, flag);
     }
+
+#ifdef ANDROID
+    char tmp[1024];
+    filename = maybe_patch_lib(filename, tmp, sizeof(tmp));
+#endif
 
     LibClass libClass = classifyLibrary(filename);
     bool intercept = libClass != LIB_UNKNOWN;
@@ -178,6 +262,24 @@ void * dlopen(const char *filename, int flag)
         os::log("apitrace: %s dlopen(\"%s\", 0x%x) from %s\n",
                 intercept ? "redirecting" : "ignoring",
                 filename, flag, caller_module);
+    } else {
+#ifdef ANDROID
+        void *caller = __builtin_return_address(0);
+        Dl_info info;
+        const char *caller_module;
+        if (dladdr(caller, &info) && info.dli_fname) {
+            caller_module = info.dli_fname;
+	    mutex.lock();
+	    auto it = lib_namespace.find(caller_module);
+	    mutex.unlock();
+	    if (it != lib_namespace.end()) {
+		android_dlextinfo extinfo;
+		extinfo.flags = ANDROID_DLEXT_USE_NAMESPACE;
+		extinfo.library_namespace = it->second;
+		return _android_dlopen_ext(filename, flag, &extinfo);
+	    }
+	}
+#endif
     }
 
 #ifdef EGLTRACE
